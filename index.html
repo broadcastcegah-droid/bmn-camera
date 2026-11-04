@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kamera Aset BMN</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#18334d;background:#eef3f8}
+*{box-sizing:border-box}body{margin:0;padding:18px;min-height:100vh;display:grid;place-items:center}
+.wrap{width:min(760px,100%);background:#fff;border:1px solid #d7e2ed;border-radius:18px;padding:18px;box-shadow:0 14px 38px #18334d1b}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:12px}.mark{width:45px;height:45px;display:grid;place-items:center;border-radius:13px;background:#e4f1fb;color:#155b8b;font-size:23px}
+h1{font-size:19px;margin:0;color:#153957}.sub{font-size:13px;line-height:1.5;color:#62768a;margin:3px 0 0}
+.status{padding:10px 12px;border-radius:10px;background:#f2f7fc;color:#31516d;font-size:13px;line-height:1.5;margin:12px 0}
+video{display:block;width:100%;max-height:65vh;aspect-ratio:4/3;object-fit:contain;background:#101a27;border-radius:13px}
+.controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px}
+select{flex:1;min-width:190px;padding:10px;border:1px solid #c8d5e2;border-radius:9px;background:#fff;font:inherit;color:inherit}
+button{border:0;border-radius:9px;padding:10px 15px;font:inherit;font-weight:700;cursor:pointer;background:#e9f1f8;color:#194d72}
+button.primary{background:#17669c;color:#fff;box-shadow:0 3px 10px #17669c30}button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:540px){body{padding:8px}.wrap{padding:13px;border-radius:14px}.controls button{flex:1}.controls select{min-width:100%}video{max-height:58vh}}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="top"><div class="mark">📷</div><div><h1>Kamera Pemeriksaan Aset BMN</h1><p class="sub">Ambil foto dari kamera laptop atau HP. Foto akan dikirim langsung kembali ke formulir BMN yang membukanya.</p></div></div>
+ <div id="status" class="status" role="status">Meminta izin kamera perangkat…</div>
+ <video id="video" autoplay playsinline muted></video>
+ <div class="controls">
+  <select id="deviceSelect" aria-label="Pilih kamera" hidden></select>
+  <button id="switchBtn" type="button" onclick="switchCamera()" hidden>Balik kamera</button>
+  <button id="startBtn" type="button" class="primary" onclick="startCamera()" hidden>Aktifkan kamera</button>
+  <button id="captureBtn" type="button" class="primary" onclick="capturePhoto()" disabled>Jepret & kirim ke BMN</button>
+  <button type="button" onclick="closePage()">Batal</button>
+ </div>
+</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const params=new URLSearchParams(location.search);
+const nonce=params.get('nonce')||'';
+const returnOrigin=params.get('returnOrigin')||'';
+let stream=null,devices=[],facing='environment',busy=false;
+function allowedReturnOrigin(value){
+ try{
+  const u=new URL(value);
+  return u.protocol==='https:'&&(u.hostname==='script.google.com'||u.hostname==='script.googleusercontent.com'||/-script\.googleusercontent\.com$/i.test(u.hostname));
+ }catch(e){return false;}
+}
+function status(text,isError=false){$('status').textContent=text;$('status').style.background=isError?'#fff1f0':'#f2f7fc';$('status').style.color=isError?'#992f2a':'#31516d';}
+function stopStream(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('video').srcObject=null;$('captureBtn').disabled=true;}
+async function startCamera(deviceId=''){
+ stopStream();status('Mengaktifkan kamera…');
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){status('Browser ini tidak menyediakan akses kamera. Gunakan Chrome/Edge terbaru dan halaman HTTPS.',true);$('startBtn').hidden=false;return;}
+ try{
+  const video=deviceId?{deviceId:{exact:deviceId},width:{ideal:1280},height:{ideal:960}}:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:960}};
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video});}
+  catch(e){if(deviceId)throw e;stream=await navigator.mediaDevices.getUserMedia({audio:false,video:true});}
+  $('video').srcObject=stream;await $('video').play();
+  const all=await navigator.mediaDevices.enumerateDevices();devices=all.filter(x=>x.kind==='videoinput');
+  const select=$('deviceSelect');select.replaceChildren();
+  devices.forEach((d,i)=>select.add(new Option(d.label||('Kamera '+(i+1)),d.deviceId)));
+  const active=stream.getVideoTracks()[0]?.getSettings()?.deviceId;if(active)select.value=active;
+  select.hidden=devices.length<2;select.onchange=()=>startCamera(select.value);
+  $('switchBtn').hidden=devices.length<2&&/Windows|Macintosh|Linux/i.test(navigator.userAgent);
+  $('startBtn').hidden=true;$('captureBtn').disabled=false;
+  status('Kamera aktif. Pastikan aset terlihat jelas, lalu tekan “Jepret & kirim ke BMN”.');
+ }catch(e){
+  stopStream();$('startBtn').hidden=false;
+  let msg=e.name==='NotAllowedError'?'Izin kamera ditolak. Klik ikon kamera di bilah alamat browser, izinkan akses, lalu tekan Aktifkan kamera.':e.name==='NotFoundError'?'Kamera tidak ditemukan. Periksa apakah webcam terpasang/aktif.':e.name==='NotReadableError'?'Kamera sedang dipakai aplikasi lain. Tutup aplikasi kamera lain lalu coba lagi.':'Kamera gagal diaktifkan: '+(e.message||e.name);
+  status(msg,true);
+ }
+}
+async function switchCamera(){facing=facing==='environment'?'user':'environment';await startCamera();}
+function capturePhoto(){
+ if(busy||!stream||!$('video').videoWidth){status('Kamera belum siap. Coba aktifkan kembali.',true);return;}
+ try{
+  busy=true;$('captureBtn').disabled=true;const v=$('video');
+  const scale=Math.min(1,1280/Math.max(v.videoWidth,v.videoHeight));
+  const canvas=document.createElement('canvas');canvas.width=Math.round(v.videoWidth*scale);canvas.height=Math.round(v.videoHeight*scale);
+  canvas.getContext('2d',{alpha:false}).drawImage(v,0,0,canvas.width,canvas.height);
+  let dataUrl=canvas.toDataURL('image/jpeg',.70);
+  if(dataUrl.length>4*1024*1024)dataUrl=canvas.toDataURL('image/jpeg',.58);
+  if(dataUrl.length>4*1024*1024)throw new Error('Ukuran foto terlalu besar. Dekatkan aset atau kurangi resolusi kamera.');
+  if(!window.opener||window.opener.closed)throw new Error('Jendela aplikasi BMN tidak ditemukan. Tutup halaman ini dan buka kamera dari tombol Ambil foto pada aplikasi.');
+  if(!nonce||!allowedReturnOrigin(returnOrigin))throw new Error('Token atau alamat kembali tidak valid. Buka kamera dari aplikasi BMN.');
+  window.opener.postMessage({type:'BMN_CAMERA_CAPTURED',nonce,dataUrl},returnOrigin);
+  status('Foto berhasil dikirim ke aplikasi BMN. Jendela kamera akan ditutup.');
+  stopStream();setTimeout(()=>window.close(),700);
+ }catch(e){busy=false;$('captureBtn').disabled=false;status(e.message||String(e),true);}
+}
+function closePage(){stopStream();window.close();}
+window.addEventListener('beforeunload',stopStream);
+if(!nonce||!allowedReturnOrigin(returnOrigin)){status('Halaman kamera ini harus dibuka melalui tombol Ambil foto dari aplikasi BMN.',true);$('startBtn').hidden=true;}
+else startCamera();
+</script>
+</body>
+</html>
